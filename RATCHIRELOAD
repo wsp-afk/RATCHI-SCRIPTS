@@ -1,0 +1,103 @@
+local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local CONFIG = {
+    Title = "RATCHI RELOAD",
+    IconId = 127087857486157,
+    RequiredPresses = 3,
+    MaxIntervalSeconds = 0.65,
+    CooldownSeconds = 3,
+    NotificationDuration = 4,
+    ReadyMessage = "Ready. Press RightCtrl 3 times to rejoin.",
+    RejoinDelaySeconds = 1.5
+}
+
+local pressTimestamps = {}
+local isReloading = false
+local lastReloadTime = 0
+
+local function sendReloadNotification(messageText)
+    local payload = {
+        Title = CONFIG.Title,
+        Text = tostring(messageText),
+        Duration = CONFIG.NotificationDuration,
+        Icon = "rbxassetid://" .. tostring(CONFIG.IconId),
+    }
+
+    for _ = 1, 10 do
+        local ok = pcall(function()
+            StarterGui:SetCore("SendNotification", payload)
+        end)
+        if ok then
+            return true
+        end
+        task.wait(0.25)
+    end
+
+    return false
+end
+
+local function rejoinSameServer()
+    local now = os.clock()
+    if isReloading or (now - lastReloadTime) < CONFIG.CooldownSeconds then
+        return
+    end
+
+    isReloading = true
+    lastReloadTime = now
+    table.clear(pressTimestamps)
+
+    sendReloadNotification("Rejoining current server...")
+    task.wait(CONFIG.RejoinDelaySeconds)
+
+    if game.JobId == "" then
+        sendReloadNotification("JobId unavailable in Studio test mode.")
+        isReloading = false
+        return
+    end
+
+    local ok, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end)
+
+    if not ok then
+        sendReloadNotification("Reload failed: " .. tostring(err))
+        isReloading = false
+        return
+    end
+
+    task.delay(8, function()
+        if LocalPlayer and LocalPlayer.Parent then
+            isReloading = false
+        end
+    end)
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or isReloading then
+        return
+    end
+
+    if input.KeyCode ~= Enum.KeyCode.RightControl then
+        return
+    end
+
+    local now = os.clock()
+    table.insert(pressTimestamps, now)
+
+    while #pressTimestamps > 0 and (now - pressTimestamps[1]) > CONFIG.MaxIntervalSeconds do
+        table.remove(pressTimestamps, 1)
+    end
+
+    if #pressTimestamps >= CONFIG.RequiredPresses then
+        rejoinSameServer()
+    end
+end)
+
+task.spawn(function()
+    sendReloadNotification(CONFIG.ReadyMessage)
+end)
